@@ -1,5 +1,6 @@
 # hocr-tools
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/f7f0fda3d58d4b588cbabfe3a406f5b6)](https://www.codacy.com/app/stweil/hocr-tools?utm_source=github.com&utm_medium=referral&utm_content=UB-Mannheim/hocr-tools&utm_campaign=badger)
 [![Build Status](https://travis-ci.org/UB-Mannheim/hocr-tools.svg?branch=master)](https://travis-ci.org/UB-Mannheim/hocr-tools) [![PyPI](https://img.shields.io/pypi/v/hocr-tools.svg?maxAge=86400)](https://pypi.python.org/pypi/hocr-tools) [![license](https://img.shields.io/badge/license-Apache%202.0-yellow.svg?style=flat)](https://github.com/tmbdev/hocr-tools/blob/master/LICENSE)
 
 
