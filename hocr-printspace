@@ -1,0 +1,159 @@
+#!/usr/bin/env python
+
+# Find the print space of a page, without margin notes
+
+import sys,os,string,re
+from lxml import html
+import argparse
+from PIL import Image, ImageDraw
+
+def get_prop(node,name):
+    title = node.get('title')
+    props = title.split(';')
+    for prop in props:
+        (key,args) = prop.split(None,1)
+        if key==name: return args
+
+def get_text(node):
+    textnodes = node.xpath(".//text()")
+    s = string.join([text for text in textnodes])
+    return re.sub(r'\s+',' ',s)
+
+def get_bbox(node):
+    bbox = get_prop(node,'bbox')
+    if not bbox: return None
+    return tuple([int(x) for x in bbox.split()])
+
+def guess_lower_boundary(freq, min):
+    candidates = sorted(freq, key=freq.get, reverse=True)
+    return [v for v in candidates if v >= min][0]
+
+def extend_line(first,last,shift):
+    if (first[0] == last[0]):
+        return [first[0]+shift, 0, first[0]+shift, height]
+    else:
+        a = (first[1]-last[1])/(first[0]-last[0])
+        b = first[1]-first[0]*a
+        zero = -b/a
+        xheight = (height-b)/a
+        return [zero+shift, 0, xheight+shift, height]
+
+
+parser = argparse.ArgumentParser(description="Find print space of a page")
+parser.add_argument("-n","--normalize_amount",type=int,default=10,
+                    help="Amount to normalize coordinates with, default: %(default)s")
+parser.add_argument("-s","--shift_amount",type=int,default=10,
+                    help="Amount to shift lines left or right")
+parser.add_argument("-D","--doublepage",default=False,action="store_true",
+                    help="Whether pages are single or double, default: %(default)s")
+parser.add_argument("-i","--inverse_vertically",default=False,action="store_true",
+                    help="Change to measure the vertical coordinate from the bottom instead of the top")
+
+parser.add_argument("hocrfile", help="hOCR file to detect print space in")
+parser.add_argument("imagefile", nargs='?', help="corresponding image file")
+
+args = parser.parse_args()
+NORMALIZE_AMOUNT = args.normalize_amount
+SHIFT_AMOUNT = args.shift_amount
+
+stream = open(args.hocrfile)
+doc = html.fromstring(stream.read())
+
+pages = doc.xpath("//*[@class='ocr_page']")
+
+for page in pages:
+    filename = get_prop(page,'file')
+    if args.imagefile:
+        filename = args.imagefile
+    im = Image.open(filename)
+    dr = ImageDraw.Draw(im)
+    width, height = im.size
+
+    print filename
+    print('Page "%s"'%page.get('title'))
+    lines = page.xpath("//*[@class='ocr_line']")
+    coord_freq = [{}, {}, {}, {}]
+    coord_list = []
+    length_freq = {}
+    empty_lines = 0
+    marginal_lines = 0
+    for line in lines:
+        #(don't need anymore)
+        #MOVE to another utility hocr-cleanboxes
+        #if not get_text(line).strip():
+        #    empty_lines += 1
+        #    continue
+        coords = get_bbox(line)
+        if args.inverse_vertically:
+            coords = list(coords)
+            coords[1] = height-coords[1]
+            coords[3] = height-coords[3]
+            coords = tuple(coords)
+        #(don't need anymore)
+        #MOVE to another utility hocr-cleanboxes
+        # discard small textblock on the margins
+        #if coords[2]<100:
+        #    marginal_lines += 1
+        #    continue
+        #if coords[0]>width-100:
+        #    marginal_lines += 1
+        #    continue
+        #print "%s"%get_text(line)
+        coord_list.append(coords)
+        length = ( int(coords[2]) - int(coords[0]) ) / NORMALIZE_AMOUNT * NORMALIZE_AMOUNT
+        if not length in length_freq:
+            length_freq[length] = 0
+        length_freq[length] += 1
+        for pos in range(0,4):
+            t = coords[pos] / NORMALIZE_AMOUNT * NORMALIZE_AMOUNT
+            if not t in coord_freq[pos]:
+                coord_freq[pos][t] = 0
+            coord_freq[pos][t] += 1
+    common_length = sorted(length_freq, key=length_freq.get, reverse=True)[0]
+    #common_left = guess_lower_boundary(coord_freq[0], 0)
+    #common_right = guess_lower_boundary(coord_freq[2], 0)
+
+    left_first = False
+    left_first_confirmed = False
+    left_last = False
+    right_first = False
+    right_first_confirmed = False
+    right_last = False
+
+    for coords in coord_list:
+        w = ( int(coords[2]) - int(coords[0]) ) / NORMALIZE_AMOUNT * NORMALIZE_AMOUNT
+        #l = int(coords[0]) / NORMALIZE_AMOUNT * NORMALIZE_AMOUNT
+        #r = int(coords[2]) / NORMALIZE_AMOUNT * NORMALIZE_AMOUNT
+        if w == common_length:
+            dr.rectangle(coords, fill=None, outline = "blue")
+            if not left_first_confirmed:
+                if left_first and abs(coords[0]-left_first[0])<2*NORMALIZE_AMOUNT:
+                    left_first_confirmed = True;
+                else:
+                    left_first = (coords[0], coords[1])
+            else:
+                left_last = (coords[0], coords[1])
+
+            if not right_first_confirmed:
+                if right_first and abs(coords[2]-right_first[0])<2*NORMALIZE_AMOUNT:
+                    right_first_confirmed = True
+                else:
+                    right_first = (coords[2], coords[3])
+            else:
+                right_last = (coords[2], coords[3])
+        else:
+            dr.rectangle(coords, fill=None, outline = "red")
+    if not left_last or not right_last:
+        print "The lines are too different for the algorithm to determine a common textblock"
+        exit
+    dr.line(extend_line(left_first,left_last,-SHIFT_AMOUNT), fill=0, width=3)
+    dr.line(extend_line(right_first,right_last,SHIFT_AMOUNT), fill=0, width=3)
+
+    new_filename = "rectangle.png"
+    if filename[-4] == ".":
+        name = filename[:-3]
+        suffix = filename[-3:]
+        new_filename = name + "block." + suffix
+    print "Saving to " + new_filename
+    im.save(new_filename)
+
